@@ -45,9 +45,24 @@ async function getVerified(domain: string): Promise<VerifiedPatterns> {
 async function writeVerified(domain: string, pattern: string, found: boolean): Promise<void> {
   try {
     await kv.hincrby(`verified:${domain}`, `${pattern}::tried`, 1);
-    if (found) await kv.hincrby(`verified:${domain}`, `${pattern}::found`, 1);
+    if (found) {
+      await kv.hincrby(`verified:${domain}`, `${pattern}::found`, 1);
+      await bumpGlobalRank(pattern);
+    }
   } catch (e) {
     console.log(`[find-email] verify write failed: ${e instanceof Error ? e.message : e}`);
+  }
+}
+
+// Fold a confirmed discovery into the global pattern ranking (last-resort
+// fallback for brand-new domains), mirroring what /seed-patterns does.
+async function bumpGlobalRank(pattern: string): Promise<void> {
+  try {
+    const rank = (await kv.get<Record<string, number>>("global:pattern_rank")) || {};
+    rank[pattern] = (rank[pattern] || 0) + 1;
+    await kv.set("global:pattern_rank", rank);
+  } catch (e) {
+    console.log(`[find-email] global rank bump failed: ${e instanceof Error ? e.message : e}`);
   }
 }
 
