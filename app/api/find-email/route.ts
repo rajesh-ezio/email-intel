@@ -77,10 +77,10 @@ function pickTopPatterns(
   const picked: Array<{ pattern: string; source: string }> = [];
   const used = new Set<string>();
 
-  // 1. Verified patterns with positive success rate (best first)
+  // 1. Verified patterns with at least one confirmed hit (best first)
   const verifiedEntries = Object.entries(verified)
-    .filter(([, v]) => v.tried >= 2 && v.rate > 0)
-    .sort((a, b) => b[1].rate - a[1].rate);
+    .filter(([, v]) => v.found >= 1)
+    .sort((a, b) => b[1].rate - a[1].rate || b[1].found - a[1].found);
   for (const [p] of verifiedEntries) {
     if (picked.length >= count) break;
     if (PATTERNS[p] && !used.has(p)) {
