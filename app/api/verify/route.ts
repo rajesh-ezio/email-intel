@@ -93,7 +93,7 @@ export async function POST(request: NextRequest) {
     // Full pipeline: Reoon → conditional Enrichley
     const reoon = await checkReoon(email);
 
-    if (reoon.safe) {
+    if (reoon.status === "safe") {
       return NextResponse.json({
         gate: "reoon",
         email,
@@ -103,8 +103,8 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Discard: invalid, disposable, spamtrap
-    if (["invalid", "disposable", "spamtrap"].includes(reoon.status)) {
+    // Only catch_all and unknown proceed to Enrichley; every other status is invalid
+    if (reoon.status !== "catch_all" && reoon.status !== "unknown") {
       return NextResponse.json({
         gate: "reoon",
         email,

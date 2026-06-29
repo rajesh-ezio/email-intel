@@ -271,7 +271,7 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
-      if (reoon.safe) {
+      if (reoon.status === "safe") {
         await writeVerified(emailDomain, pattern, true);
         return NextResponse.json({
           found_email: candidateEmail,
@@ -287,7 +287,8 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      if (["invalid", "disposable", "spamtrap"].includes(reoon.status)) {
+      // Only catch_all and unknown go to Enrichley; every other status is rejected
+      if (reoon.status !== "catch_all" && reoon.status !== "unknown") {
         await writeVerified(emailDomain, pattern, false);
         continue;
       }
