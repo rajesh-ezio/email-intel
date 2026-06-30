@@ -173,7 +173,22 @@ function pickTopPatterns(
     }
   }
 
-  // 4. If still empty, fallback to first.last
+  // 4. Always probe at least 2 extra patterns from global rank, even if zeroRate suppressed them.
+  // Covers cases where the domain's verified history is stale or the person uses a rare pattern.
+  const zeroRateEntries = Object.entries(globalRank)
+    .filter(([p]) => !used.has(p) && zeroRate.has(p))
+    .sort((a, b) => b[1] - a[1]);
+  let extraProbes = 0;
+  for (const [p] of zeroRateEntries) {
+    if (picked.length >= count || extraProbes >= 2) break;
+    if (PATTERNS[p]) {
+      picked.push({ pattern: p, source: "global_probe" });
+      used.add(p);
+      extraProbes++;
+    }
+  }
+
+  // 5. If still empty, fallback to first.last
   if (picked.length === 0) {
     picked.push({ pattern: "first.last", source: "fallback" });
   }
