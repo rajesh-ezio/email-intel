@@ -450,13 +450,11 @@ export async function POST(request: NextRequest) {
       await writeVerified(eDomain, pattern, false);
     }
 
-    // Mark domain as anti-probe after 3+ failed Reoon attempts with 0 finds:
-    // - "invalid": Reoon never returned catch_all/unknown (pure rejection)
-    // - "catchall": Enrichley cap hit with 0 finds (catch_all but unverifiable)
+    // Mark domain as anti-probe after 3+ failed Reoon attempts with 0 finds.
+    // Any domain that burns 3+ attempts and returns nothing is not worth retrying.
     if (reoonCalls >= 3) {
-      const hasCatchAll = [...reoonStatuses].some(s => s === "catch_all" || s === "unknown");
-      if (enrichleyCalls >= 5) await markAntiprobe(domain, "catchall");
-      else if (!hasCatchAll) await markAntiprobe(domain, "invalid");
+      const type = enrichleyCalls > 0 ? "catchall" : "invalid";
+      await markAntiprobe(domain, type);
     }
 
     return NextResponse.json({
