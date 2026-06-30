@@ -83,24 +83,6 @@ async function getGlobalPatternRank(): Promise<Record<string, number>> {
   }
 }
 
-// Trusted-seed thresholds: when a domain's real-email seeds overwhelmingly use
-// one pattern, we trust it even if the verifier can't confirm (anti-probe /
-// catch-all servers like banks return false negatives for valid mailboxes).
-const SEED_MIN_SAMPLES = 3;
-const SEED_MIN_SHARE = 0.7;
-
-// Return the dominant seeded pattern for a domain, or null if none qualifies.
-function dominantSeed(seeded: Record<string, number>): string | null {
-  const entries = Object.entries(seeded).filter(([p]) => PATTERNS[p]);
-  if (entries.length === 0) return null;
-  const total = entries.reduce((sum, [, n]) => sum + n, 0);
-  const [topPattern, topCount] = entries.sort((a, b) => b[1] - a[1])[0];
-  if (total >= SEED_MIN_SAMPLES && topCount / total >= SEED_MIN_SHARE) {
-    return topPattern;
-  }
-  return null;
-}
-
 function pickTopPatterns(
   seeded: Record<string, number>,
   verified: VerifiedPatterns,
@@ -283,55 +265,6 @@ export async function POST(request: NextRequest) {
     let reoonCalls = 0;
     let enrichleyCalls = 0;
     const patternsTried: string[] = [];
-
-    // Trusted-seed short-circuit: if real-email seeds for this domain are
-    // dominated by one pattern, use it. Confirm once with Reoon (cheap); if
-    // Reoon can't positively confirm (false-negative on anti-probe domains),
-    // return the seed-pattern email anyway and skip Enrichley + other patterns.
-    const seedPattern = dominantSeed(seeded);
-    if (seedPattern) {
-      const seedEmail = generateEmail(first, last, emailDomain, seedPattern);
-      if (seedEmail) {
-        let reoonStatus = "skipped";
-        try {
-          const reoon = await checkReoon(seedEmail);
-          reoonCalls++;
-          reoonStatus = reoon.status;
-          console.log(`[find-email] seed-trust ${seedEmail} (${seedPattern}) | reoon: ${reoon.status} safe:${reoon.safe}`);
-          if (reoon.status === "safe") {
-            await writeVerified(emailDomain, seedPattern, true);
-            return NextResponse.json({
-              found_email: seedEmail,
-              verification: "reoon_safe",
-              pattern: seedPattern,
-              pattern_source: "seed",
-              reoon_status: reoon.status,
-              domain: emailDomain,
-              attempts: 1,
-              reoon_calls: reoonCalls,
-              enrichley_calls: enrichleyCalls,
-              patterns_tried: [seedPattern],
-            });
-          }
-        } catch (e) {
-          reoonCalls++;
-          console.log(`[find-email] seed-trust reoon failed: ${e instanceof Error ? e.message : e}`);
-        }
-        // Reoon couldn't confirm — trust the dominant seed (domain likely unverifiable)
-        return NextResponse.json({
-          found_email: seedEmail,
-          verification: "seed_pattern",
-          pattern: seedPattern,
-          pattern_source: "seed",
-          reoon_status: reoonStatus,
-          domain: emailDomain,
-          attempts: 1,
-          reoon_calls: reoonCalls,
-          enrichley_calls: enrichleyCalls,
-          patterns_tried: [seedPattern],
-        });
-      }
-    }
 
     console.log(`[find-email] ${first} ${last} @ ${domain} → ${emailDomain} | trying ${candidates.length} patterns`);
 

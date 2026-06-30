@@ -58,38 +58,31 @@ Order, best first: **verified** (`found >= 1`, highest rate first) → **seeded*
 → **global rank** → fallback `first.last`. Patterns with `tried >= 2` and zero `found` are
 suppressed. The loop **stops at the first success**.
 
-## Trusted-seed rule (the key optimization)
+## Policy: verified-only (no unverified guessing)
 
-**Problem:** anti-probe / catch-all mail servers (banks: kotak, barclays, icici, aubank…)
-return **false negatives** — Reoon says `invalid`/`catch_all` even for valid mailboxes, and
-Enrichley can't validate them. So `/find-email` returned `all_patterns_failed` for domains
-where we have **hundreds of confirmed real-email seeds** (e.g. kotak.com = `first.last`, 228
-samples), throwing away the correct answer and burning Enrichley.
+**Every returned email must be confirmed by a live Reoon/Enrichley call.** The tool does
+**not** return seed-based guesses without verifying them.
 
-**Fix (in `/find-email`, before the normal loop):** if a domain's seeds are dominated by one
-pattern (`SEED_MIN_SAMPLES = 3`, `SEED_MIN_SHARE = 0.7`):
-1. Generate the email with that pattern, try **Reoon once**.
-2. Reoon `safe` → return `reoon_safe`.
-3. Otherwise → return the seed-pattern email anyway with `verification: "seed_pattern"`,
-   `pattern_source: "seed"`, and **skip Enrichley + all other patterns**.
-
-This roughly **doubles finds** and **eliminates wasted Enrichley** on bank domains. It is
-safe **because seeds are ground truth** (real emails only).
+**Known limitation (accepted on purpose):** anti-probe / catch-all mail servers (banks:
+kotak, barclays, icici, aubank…) return false negatives — Reoon says `invalid`/`catch_all`
+even for valid mailboxes, and Enrichley can't validate them. For those domains `/find-email`
+returns `all_patterns_failed` even when we hold hundreds of confirmed real-email seeds (e.g.
+kotak.com = `first.last`, 228 samples). The owner chose verified-only over returning
+high-probability-but-unconfirmed addresses. (A "trusted-seed" short-circuit that returned
+seed-based guesses was built and then **removed by request** — do not reintroduce it without
+explicit approval.)
 
 ## `Verification` result values
 
 - `reoon_safe` — Reoon confirmed safe.
 - `enrichley_valid` — Enrichley confirmed on a `catch_all`/`unknown`.
-- `seed_pattern` — **UNVERIFIED**; trusted from the dominant seed on an unverifiable domain.
-  High-probability but not confirmed — treat accordingly downstream.
-- `all_patterns_failed` — nothing found.
+- `all_patterns_failed` — nothing found (includes anti-probe/catch-all domains the verifier can't confirm).
 - `skipped_bad_name` — name too short/invalid.
 
 ## Critical invariants / gotchas
 
 - **Seeds (`patterns:`) come ONLY from real known emails.** Do **not** feed `/find-email`'s
-  `Found Email` back into `/seed-patterns` — *especially* not `seed_pattern` (unverified)
-  results — or you create a feedback loop the trusted-seed rule would then blindly trust.
+  `Found Email` back into `/seed-patterns` — keep the seed store ground-truth-only.
 - `/find-email` writes discoveries to `verified:`, **not** `patterns:` — by design, to keep
   seeds clean. Discoveries still help future lookups via the `verified:` ranking path.
 - **Deploys are manual** (`vercel --prod`). GitHub push does not deploy.
@@ -112,4 +105,5 @@ Env vars live in the Vercel project: `REOON_API_KEY`, `ENRICHLEY_API_KEY`, `API_
 1. Trust a single confirmed hit (`found >= 1` instead of `tried >= 2`).
 2. Reoon **status**-based decision (was `is_safe_to_send`); `inbox_full` now rejected.
 3. `/find-email` confirmed hits feed `global:pattern_rank`.
-4. **Trusted-seed short-circuit** for unverifiable (catch-all/anti-probe) domains.
+
+Policy: **verified-only**. (A trusted-seed short-circuit was built then removed by request.)
