@@ -157,29 +157,28 @@ function pickTopPatterns(
   return picked;
 }
 
-// Build a round-robin interleaved candidate list across multiple email domains.
-// Each domain gets its ranked patterns; we pull one from each domain per round
-// until the total budget is exhausted. This ensures breadth-first coverage —
-// every domain's best pattern is tried before any domain gets a second attempt.
+// Build depth-first candidates: try N patterns per domain before moving to the next.
+// Domain order: input domain first, then by seed count desc.
+// patternsPerDomain = floor(budget / min(numDomains, floor(budget/3)))
+// e.g. budget=10: 1 domain→10, 2 domains→5 each, 3+→3 each (top 3 domains only)
 function buildGroupCandidates(
   domainPatterns: Array<{ emailDomain: string; patterns: Array<{ pattern: string; source: string }> }>,
   budget: number
 ): Array<{ emailDomain: string; pattern: string; source: string }> {
-  const candidates: Array<{ emailDomain: string; pattern: string; source: string }> = [];
-  const indices = new Array(domainPatterns.length).fill(0);
+  const minPerDomain = 3;
+  const maxDomains = Math.max(1, Math.floor(budget / minPerDomain));
+  const domainsToUse = Math.min(domainPatterns.length, maxDomains);
+  const patternsPerDomain = Math.floor(budget / domainsToUse);
 
-  while (candidates.length < budget) {
-    let added = false;
-    for (let i = 0; i < domainPatterns.length; i++) {
+  const candidates: Array<{ emailDomain: string; pattern: string; source: string }> = [];
+
+  for (let i = 0; i < domainsToUse; i++) {
+    const { emailDomain, patterns } = domainPatterns[i];
+    const take = Math.min(patternsPerDomain, patterns.length);
+    for (let j = 0; j < take; j++) {
       if (candidates.length >= budget) break;
-      const { emailDomain, patterns } = domainPatterns[i];
-      if (indices[i] < patterns.length) {
-        candidates.push({ emailDomain, ...patterns[indices[i]] });
-        indices[i]++;
-        added = true;
-      }
+      candidates.push({ emailDomain, ...patterns[j] });
     }
-    if (!added) break; // all domains exhausted
   }
 
   return candidates;
