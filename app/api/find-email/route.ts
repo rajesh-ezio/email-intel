@@ -389,12 +389,14 @@ export async function POST(request: NextRequest) {
 
     console.log(`[find-email] ${first} ${last} @ ${domain} | domains: ${domainsToTry.join(", ")}`);
 
+    let groupTotalSeeds = 0;
     const groupData = await Promise.all(
       domainsToTry.map(async (d) => {
         const [gSeeded, gVerified] = await Promise.all([
           getPatterns(d),
           getVerified(d),
         ]);
+        groupTotalSeeds += Object.values(gSeeded).reduce((a, b) => a + b, 0);
         const patterns = pickTopPatterns(gSeeded, gVerified, globalRank, patternCount);
         return { emailDomain: d, patterns };
       })
@@ -490,8 +492,7 @@ export async function POST(request: NextRequest) {
     // Any domain that burns 3+ attempts and returns nothing is not worth retrying.
     // Only mark antiprobe if domain has fewer than 10 seeds — strong-seed domains
     // (banks, large companies) should never be blacklisted even if current run fails.
-    const domainSeedCount = Object.values(seededDomain).reduce((a, b) => a + b, 0);
-    if (reoonCalls >= 5 && domainSeedCount < 10) {
+    if (reoonCalls >= 5 && groupTotalSeeds < 10) {
       const type = enrichleyCalls > 0 ? "catchall" : "invalid";
       await markAntiprobe(domain, type);
     }
