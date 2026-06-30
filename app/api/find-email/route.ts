@@ -490,9 +490,10 @@ export async function POST(request: NextRequest) {
 
     // Mark domain as anti-probe after 3+ failed Reoon attempts with 0 finds.
     // Any domain that burns 3+ attempts and returns nothing is not worth retrying.
-    // Only mark antiprobe if domain has fewer than 10 seeds — strong-seed domains
-    // (banks, large companies) should never be blacklisted even if current run fails.
-    if (reoonCalls >= 5 && groupTotalSeeds < 10) {
+    // Never mark antiprobe for bank.in subdomains (RBI-regulated, Reoon always returns invalid).
+    // Only mark if group has fewer than 10 seeds — strong-seed groups are worth retrying.
+    const isBankIn = domain.endsWith(".bank.in");
+    if (reoonCalls >= 5 && !isBankIn && groupTotalSeeds < 10) {
       const type = enrichleyCalls > 0 ? "catchall" : "invalid";
       await markAntiprobe(domain, type);
     }
