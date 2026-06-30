@@ -306,33 +306,28 @@ export async function POST(request: NextRequest) {
 
     let candidates: Array<{ emailDomain: string; pattern: string; source: string }>;
 
+    // Always include the input domain as a candidate domain, plus any group/mapped domains.
+    // Build a deduplicated list of domains to try, with input domain first.
+    const domainsToTry: string[] = [domain];
     if (group.length > 0) {
-      // Group mode: load patterns for all domains in parallel, then interleave
-      console.log(`[find-email] ${first} ${last} @ ${domain} | group mode: ${group.join(", ")}`);
-      const groupData = await Promise.all(
-        group.map(async (gDomain) => {
-          const [gSeeded, gVerified] = await Promise.all([
-            getPatterns(gDomain),
-            getVerified(gDomain),
-          ]);
-          const patterns = pickTopPatterns(gSeeded, gVerified, globalRank, patternCount);
-          return { emailDomain: gDomain, patterns };
-        })
-      );
-      candidates = buildGroupCandidates(groupData, patternCount);
-    } else {
-      // Single domain mode — existing behaviour
-      let seeded = seededDomain;
-      let verified = verifiedDomain;
-      if (Object.keys(seeded).length === 0 && mappedEmailDomain) {
-        [seeded, verified] = await Promise.all([
-          getPatterns(mappedEmailDomain),
-          getVerified(mappedEmailDomain),
-        ]);
-      }
-      const patterns = pickTopPatterns(seeded, verified, globalRank, patternCount);
-      candidates = patterns.map((p) => ({ emailDomain, ...p }));
+      for (const g of group) if (!domainsToTry.includes(g)) domainsToTry.push(g);
+    } else if (mappedEmailDomain && mappedEmailDomain !== domain) {
+      domainsToTry.push(mappedEmailDomain);
     }
+
+    console.log(`[find-email] ${first} ${last} @ ${domain} | domains: ${domainsToTry.join(", ")}`);
+
+    const groupData = await Promise.all(
+      domainsToTry.map(async (d) => {
+        const [gSeeded, gVerified] = await Promise.all([
+          getPatterns(d),
+          getVerified(d),
+        ]);
+        const patterns = pickTopPatterns(gSeeded, gVerified, globalRank, patternCount);
+        return { emailDomain: d, patterns };
+      })
+    );
+    candidates = buildGroupCandidates(groupData, patternCount);
 
     let reoonCalls = 0;
     let enrichleyCalls = 0;
