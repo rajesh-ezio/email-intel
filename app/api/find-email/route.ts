@@ -452,7 +452,7 @@ export async function POST(request: NextRequest) {
 
     // Mark domain as anti-probe after 3+ failed Reoon attempts with 0 finds.
     // Any domain that burns 3+ attempts and returns nothing is not worth retrying.
-    if (reoonCalls >= 3) {
+    if (reoonCalls >= 5) {
       const type = enrichleyCalls > 0 ? "catchall" : "invalid";
       await markAntiprobe(domain, type);
     }
