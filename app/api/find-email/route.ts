@@ -122,12 +122,10 @@ function pickTopPatterns(
     }
   }
 
-  // 2. Seeded patterns by count (highest first), skip 0% verified ones
-  const zeroRate = new Set(
-    Object.entries(verified).filter(([, v]) => v.tried >= 2 && v.rate === 0).map(([p]) => p)
-  );
+  // 2. Seeded patterns by count (highest first) — never suppressed by zeroRate.
+  // Seeds are ground truth from real emails; if Reoon rejects them it's anti-probe, not wrong pattern.
   const seededEntries = Object.entries(seeded)
-    .filter(([p]) => !used.has(p) && !zeroRate.has(p))
+    .filter(([p]) => !used.has(p))
     .sort((a, b) => b[1] - a[1]);
   for (const [p] of seededEntries) {
     if (picked.length >= count) break;
@@ -137,7 +135,12 @@ function pickTopPatterns(
     }
   }
 
-  // 3. Global pattern rank as fallback
+  // 3. Global pattern rank as fallback — suppress only non-seeded patterns with 0% hit rate
+  const zeroRate = new Set(
+    Object.entries(verified)
+      .filter(([p, v]) => v.tried >= 2 && v.rate === 0 && !seeded[p])
+      .map(([p]) => p)
+  );
   const globalEntries = Object.entries(globalRank)
     .filter(([p]) => !used.has(p) && !zeroRate.has(p))
     .sort((a, b) => b[1] - a[1]);
