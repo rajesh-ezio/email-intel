@@ -405,6 +405,7 @@ export async function POST(request: NextRequest) {
 
     let reoonCalls = 0;
     let enrichleyCalls = 0;
+    let consecutiveInvalid = 0;
     const patternsTried: string[] = [];
     const domainsTried = new Set<string>();
     const reoonStatuses = new Set<string>();
@@ -449,8 +450,14 @@ export async function POST(request: NextRequest) {
 
       if (reoon.status !== "catch_all" && reoon.status !== "unknown") {
         await writeVerified(eDomain, pattern, false);
+        consecutiveInvalid++;
+        if (consecutiveInvalid >= 3) {
+          console.log(`[find-email] early exit: 3 consecutive invalid on ${domain}`);
+          break;
+        }
         continue;
       }
+      consecutiveInvalid = 0;
 
       if (enrichleyCalls >= 5) {
         await writeVerified(eDomain, pattern, false);
