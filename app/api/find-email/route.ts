@@ -247,6 +247,22 @@ async function checkEnrichley(email: string): Promise<{
   };
 }
 
+async function getAntiprobe(domain: string): Promise<string | null> {
+  try {
+    return await kv.get<string>(`antiprobe:${domain}`);
+  } catch {
+    return null;
+  }
+}
+
+async function markAntiprobe(domain: string, type: "invalid" | "catchall"): Promise<void> {
+  try {
+    const ttl = 30 * 24 * 60 * 60; // 30 days
+    await kv.set(`antiprobe:${domain}`, type, { ex: ttl });
+    console.log(`[find-email] antiprobe marked: ${domain} = ${type}`);
+  } catch {}
+}
+
 async function checkRedis(): Promise<boolean> {
   try {
     await kv.ping();
@@ -296,6 +312,24 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    const antiprobe = await getAntiprobe(domain);
+    if (antiprobe) {
+      console.log(`[find-email] antiprobe skip: ${domain} (${antiprobe})`);
+      return NextResponse.json({
+        found_email: null,
+        verification: "antiprobe_skip",
+        pattern: null,
+        reoon_status: null,
+        domain,
+        attempts: 0,
+        reoon_calls: 0,
+        enrichley_calls: 0,
+        patterns_tried: [],
+        domains_tried: [],
+        reason: `Domain marked anti-probe (${antiprobe}) — skipped to save credits`,
+      });
+    }
+
     const [mappedEmailDomain, seededDomain, verifiedDomain, globalRank, group] = await Promise.all([
       getEmailDomainMapping(domain),
       getPatterns(domain),
@@ -335,6 +369,7 @@ export async function POST(request: NextRequest) {
     let enrichleyCalls = 0;
     const patternsTried: string[] = [];
     const domainsTried = new Set<string>();
+    const reoonStatuses = new Set<string>();
 
     console.log(`[find-email] ${first} ${last} @ ${domain} → ${emailDomain} | trying ${candidates.length} candidates`);
 
@@ -349,6 +384,7 @@ export async function POST(request: NextRequest) {
       try {
         reoon = await checkReoon(candidateEmail);
         reoonCalls++;
+        reoonStatuses.add(reoon.status);
         console.log(`[find-email] #${patternsTried.length} ${candidateEmail} (${source}) | reoon: ${reoon.status}`);
       } catch (e) {
         reoonCalls++;
@@ -412,6 +448,15 @@ export async function POST(request: NextRequest) {
       }
 
       await writeVerified(eDomain, pattern, false);
+    }
+
+    // Mark domain as anti-probe if all Reoon calls returned invalid (never catch_all/unknown)
+    // or if catch_all but Enrichley cap was hit with 0 finds — saves credits on repeat runs
+    if (reoonCalls >= 3) {
+      const allInvalid = [...reoonStatuses].every(s => s === "invalid");
+      const allCatchAll = [...reoonStatuses].every(s => s === "catch_all" || s === "unknown");
+      if (allInvalid) await markAntiprobe(domain, "invalid");
+      else if (allCatchAll && enrichleyCalls >= 5) await markAntiprobe(domain, "catchall");
     }
 
     return NextResponse.json({
