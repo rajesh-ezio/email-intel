@@ -42,6 +42,15 @@ async function getVerified(domain: string): Promise<VerifiedPatterns> {
   }
 }
 
+async function getGroup(domain: string): Promise<string[]> {
+  try {
+    const data = await kv.get<string[]>(`group:${domain}`);
+    return data || [];
+  } catch {
+    return [];
+  }
+}
+
 async function writeVerified(domain: string, pattern: string, found: boolean): Promise<void> {
   try {
     await kv.hincrby(`verified:${domain}`, `${pattern}::tried`, 1);
@@ -55,8 +64,6 @@ async function writeVerified(domain: string, pattern: string, found: boolean): P
   }
 }
 
-// Fold a confirmed find into the domain's seed store so future lookups rank
-// this pattern higher without needing a manual /seed-patterns call.
 async function bumpDomainSeed(domain: string, pattern: string): Promise<void> {
   try {
     const seeds = (await kv.get<Record<string, number>>(`patterns:${domain}`)) || {};
@@ -67,8 +74,6 @@ async function bumpDomainSeed(domain: string, pattern: string): Promise<void> {
   }
 }
 
-// Fold a confirmed discovery into the global pattern ranking (last-resort
-// fallback for brand-new domains), mirroring what /seed-patterns does.
 async function bumpGlobalRank(pattern: string): Promise<void> {
   try {
     const rank = (await kv.get<Record<string, number>>("global:pattern_rank")) || {};
@@ -150,6 +155,34 @@ function pickTopPatterns(
   }
 
   return picked;
+}
+
+// Build a round-robin interleaved candidate list across multiple email domains.
+// Each domain gets its ranked patterns; we pull one from each domain per round
+// until the total budget is exhausted. This ensures breadth-first coverage —
+// every domain's best pattern is tried before any domain gets a second attempt.
+function buildGroupCandidates(
+  domainPatterns: Array<{ emailDomain: string; patterns: Array<{ pattern: string; source: string }> }>,
+  budget: number
+): Array<{ emailDomain: string; pattern: string; source: string }> {
+  const candidates: Array<{ emailDomain: string; pattern: string; source: string }> = [];
+  const indices = new Array(domainPatterns.length).fill(0);
+
+  while (candidates.length < budget) {
+    let added = false;
+    for (let i = 0; i < domainPatterns.length; i++) {
+      if (candidates.length >= budget) break;
+      const { emailDomain, patterns } = domainPatterns[i];
+      if (indices[i] < patterns.length) {
+        candidates.push({ emailDomain, ...patterns[indices[i]] });
+        indices[i]++;
+        added = true;
+      }
+    }
+    if (!added) break; // all domains exhausted
+  }
+
+  return candidates;
 }
 
 function authorize(req: NextRequest): boolean {
@@ -261,44 +294,63 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const [mappedEmailDomain, seededDomain, verifiedDomain, globalRank] = await Promise.all([
+    const [mappedEmailDomain, seededDomain, verifiedDomain, globalRank, group] = await Promise.all([
       getEmailDomainMapping(domain),
       getPatterns(domain),
       getVerified(domain),
       getGlobalPatternRank(),
+      getGroup(domain),
     ]);
 
     const emailDomain = mappedEmailDomain || domain;
 
-    let seeded = seededDomain;
-    let verified = verifiedDomain;
+    let candidates: Array<{ emailDomain: string; pattern: string; source: string }>;
 
-    if (Object.keys(seeded).length === 0 && mappedEmailDomain) {
-      [seeded, verified] = await Promise.all([
-        getPatterns(mappedEmailDomain),
-        getVerified(mappedEmailDomain),
-      ]);
+    if (group.length > 0) {
+      // Group mode: load patterns for all domains in parallel, then interleave
+      console.log(`[find-email] ${first} ${last} @ ${domain} | group mode: ${group.join(", ")}`);
+      const groupData = await Promise.all(
+        group.map(async (gDomain) => {
+          const [gSeeded, gVerified] = await Promise.all([
+            getPatterns(gDomain),
+            getVerified(gDomain),
+          ]);
+          const patterns = pickTopPatterns(gSeeded, gVerified, globalRank, patternCount);
+          return { emailDomain: gDomain, patterns };
+        })
+      );
+      candidates = buildGroupCandidates(groupData, patternCount);
+    } else {
+      // Single domain mode — existing behaviour
+      let seeded = seededDomain;
+      let verified = verifiedDomain;
+      if (Object.keys(seeded).length === 0 && mappedEmailDomain) {
+        [seeded, verified] = await Promise.all([
+          getPatterns(mappedEmailDomain),
+          getVerified(mappedEmailDomain),
+        ]);
+      }
+      const patterns = pickTopPatterns(seeded, verified, globalRank, patternCount);
+      candidates = patterns.map((p) => ({ emailDomain, ...p }));
     }
-    const candidates = pickTopPatterns(seeded, verified, globalRank, patternCount);
 
     let reoonCalls = 0;
     let enrichleyCalls = 0;
     const patternsTried: string[] = [];
 
-    console.log(`[find-email] ${first} ${last} @ ${domain} → ${emailDomain} | trying ${candidates.length} patterns`);
+    console.log(`[find-email] ${first} ${last} @ ${domain} → ${emailDomain} | trying ${candidates.length} candidates`);
 
-    for (const { pattern, source } of candidates) {
-      const candidateEmail = generateEmail(first, last, emailDomain, pattern);
+    for (const { emailDomain: eDomain, pattern, source } of candidates) {
+      const candidateEmail = generateEmail(first, last, eDomain, pattern);
       if (!candidateEmail) continue;
 
-      patternsTried.push(pattern);
+      patternsTried.push(`${eDomain}:${pattern}`);
 
-      // Reoon check
       let reoon: { status: string; safe: boolean };
       try {
         reoon = await checkReoon(candidateEmail);
         reoonCalls++;
-        console.log(`[find-email] #${patternsTried.length} ${candidateEmail} (${source}) | reoon: ${reoon.status} safe:${reoon.safe}`);
+        console.log(`[find-email] #${patternsTried.length} ${candidateEmail} (${source}) | reoon: ${reoon.status}`);
       } catch (e) {
         reoonCalls++;
         console.log(`[find-email] reoon failed: ${e instanceof Error ? e.message : e}`);
@@ -306,14 +358,14 @@ export async function POST(request: NextRequest) {
       }
 
       if (reoon.status === "safe") {
-        await writeVerified(emailDomain, pattern, true);
+        await writeVerified(eDomain, pattern, true);
         return NextResponse.json({
           found_email: candidateEmail,
           verification: "reoon_safe",
           pattern,
           pattern_source: source,
           reoon_status: reoon.status,
-          domain: emailDomain,
+          domain: eDomain,
           attempts: patternsTried.length,
           reoon_calls: reoonCalls,
           enrichley_calls: enrichleyCalls,
@@ -321,13 +373,11 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      // Only catch_all and unknown go to Enrichley; every other status is rejected
       if (reoon.status !== "catch_all" && reoon.status !== "unknown") {
-        await writeVerified(emailDomain, pattern, false);
+        await writeVerified(eDomain, pattern, false);
         continue;
       }
 
-      // Enrichley for catch-all/unknown
       let enrichley: { valid: boolean; result: string };
       try {
         enrichley = await checkEnrichley(candidateEmail);
@@ -340,7 +390,7 @@ export async function POST(request: NextRequest) {
       }
 
       if (enrichley.valid) {
-        await writeVerified(emailDomain, pattern, true);
+        await writeVerified(eDomain, pattern, true);
         return NextResponse.json({
           found_email: candidateEmail,
           verification: "enrichley_valid",
@@ -348,7 +398,7 @@ export async function POST(request: NextRequest) {
           pattern_source: source,
           reoon_status: reoon.status,
           enrichley_result: enrichley.result,
-          domain: emailDomain,
+          domain: eDomain,
           attempts: patternsTried.length,
           reoon_calls: reoonCalls,
           enrichley_calls: enrichleyCalls,
@@ -356,7 +406,7 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      await writeVerified(emailDomain, pattern, false);
+      await writeVerified(eDomain, pattern, false);
     }
 
     return NextResponse.json({
