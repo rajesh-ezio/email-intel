@@ -200,7 +200,7 @@ async function checkReoon(email: string): Promise<{
   if (!key) throw new Error("REOON_API_KEY not set");
 
   const url = `https://emailverifier.reoon.com/api/v1/verify?email=${encodeURIComponent(email)}&key=${key}&mode=power`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(45000) });
+  const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
 
   if (!res.ok) throw new Error(`Reoon HTTP ${res.status}`);
 
