@@ -261,18 +261,24 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const mappedEmailDomain = await getEmailDomainMapping(domain);
+    const [mappedEmailDomain, seededDomain, verifiedDomain, globalRank] = await Promise.all([
+      getEmailDomainMapping(domain),
+      getPatterns(domain),
+      getVerified(domain),
+      getGlobalPatternRank(),
+    ]);
+
     const emailDomain = mappedEmailDomain || domain;
 
-    let seeded = await getPatterns(domain);
-    let verified = await getVerified(domain);
+    let seeded = seededDomain;
+    let verified = verifiedDomain;
 
     if (Object.keys(seeded).length === 0 && mappedEmailDomain) {
-      seeded = await getPatterns(mappedEmailDomain);
-      verified = await getVerified(mappedEmailDomain);
+      [seeded, verified] = await Promise.all([
+        getPatterns(mappedEmailDomain),
+        getVerified(mappedEmailDomain),
+      ]);
     }
-
-    const globalRank = await getGlobalPatternRank();
     const candidates = pickTopPatterns(seeded, verified, globalRank, patternCount);
 
     let reoonCalls = 0;
