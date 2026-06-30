@@ -48,9 +48,22 @@ async function writeVerified(domain: string, pattern: string, found: boolean): P
     if (found) {
       await kv.hincrby(`verified:${domain}`, `${pattern}::found`, 1);
       await bumpGlobalRank(pattern);
+      await bumpDomainSeed(domain, pattern);
     }
   } catch (e) {
     console.log(`[find-email] verify write failed: ${e instanceof Error ? e.message : e}`);
+  }
+}
+
+// Fold a confirmed find into the domain's seed store so future lookups rank
+// this pattern higher without needing a manual /seed-patterns call.
+async function bumpDomainSeed(domain: string, pattern: string): Promise<void> {
+  try {
+    const seeds = (await kv.get<Record<string, number>>(`patterns:${domain}`)) || {};
+    seeds[pattern] = (seeds[pattern] || 0) + 1;
+    await kv.set(`patterns:${domain}`, seeds);
+  } catch (e) {
+    console.log(`[find-email] seed bump failed: ${e instanceof Error ? e.message : e}`);
   }
 }
 
