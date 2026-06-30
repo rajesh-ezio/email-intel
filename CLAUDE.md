@@ -3,8 +3,14 @@
 # Email Pattern Finder — project knowledge
 
 A Next.js app on Vercel that **finds and verifies corporate email addresses**. The
-main consumer is a **Clay workflow** that calls the HTTP API endpoints. Deploys are
-**manual via `vercel --prod`** — GitHub is a backup only and pushing does NOT auto-deploy.
+main consumer is a **Clay workflow** that calls the HTTP API endpoints.
+
+**Deploys:** the project is **Git-connected** — pushing to `main` **auto-deploys** to
+production. You can also deploy manually with `vercel --prod`. ⚠️ The
+`email-pattern-finder.vercel.app` alias (the URL Clay calls) is a **manually pinned alias**
+that does NOT auto-update on deploy — after shipping, repoint it
+(`vercel alias set <deployment-url> email-pattern-finder.vercel.app`) or add it as a
+Production domain in project settings so it follows `main`.
 
 ## Endpoints (`app/api/`)
 
@@ -85,7 +91,9 @@ explicit approval.)
   `Found Email` back into `/seed-patterns` — keep the seed store ground-truth-only.
 - `/find-email` writes discoveries to `verified:`, **not** `patterns:` — by design, to keep
   seeds clean. Discoveries still help future lookups via the `verified:` ranking path.
-- **Deploys are manual** (`vercel --prod`). GitHub push does not deploy.
+- **`main` auto-deploys** (Git-connected); `vercel --prod` also works. The
+  `email-pattern-finder.vercel.app` alias is manual — it won't follow a new deploy unless
+  repointed or set as a Production domain.
 - `patternCount` is the Enrichley ceiling per lookup (up to that many on catch-all domains).
 
 ## Local dev / deploy
