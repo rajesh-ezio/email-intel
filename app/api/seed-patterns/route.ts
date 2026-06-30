@@ -119,9 +119,16 @@ export async function POST(request: NextRequest) {
           await updateMeta(cleaned);
           domainsSeen.add(cleaned);
 
-          // Email domain mapping
+          // Email domain mapping — only write after 3+ seeds agree on the
+          // same email domain to avoid job-change contamination (person moved
+          // companies but Clay still has old companyDomain).
           try {
-            await kv.set(`emaildomain:${cleaned}`, emailDomain, {});
+            const companyPatterns = await getPatterns(cleaned);
+            const totalSeeds = Object.values(companyPatterns).reduce((a, b) => a + b, 0);
+            const existing = await kv.get<string>(`emaildomain:${cleaned}`);
+            if (existing === emailDomain || totalSeeds >= 3) {
+              await kv.set(`emaildomain:${cleaned}`, emailDomain, {});
+            }
           } catch {}
         }
       }
