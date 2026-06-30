@@ -378,6 +378,11 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
+      if (enrichleyCalls >= 5) {
+        await writeVerified(eDomain, pattern, false);
+        continue;
+      }
+
       let enrichley: { valid: boolean; result: string };
       try {
         enrichley = await checkEnrichley(candidateEmail);
