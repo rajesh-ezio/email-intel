@@ -92,12 +92,33 @@ async function getEmailDomainMapping(domain: string): Promise<string | null> {
   }
 }
 
+// Hardcoded fallback rank derived from aggregate seed data — used when Redis returns empty.
+const FALLBACK_PATTERN_RANK: Record<string, number> = {
+  "first.last": 4615,
+  "first": 716,
+  "firstlast": 316,
+  "flast": 247,
+  "firstl": 128,
+  "first_last": 98,
+  "last.first": 90,
+  "f.last": 63,
+  "lastf": 31,
+  "last.f": 25,
+  "first-last": 10,
+  "lastfirst": 5,
+};
+
 async function getGlobalPatternRank(): Promise<Record<string, number>> {
   try {
     const data = await kv.get<Record<string, number>>("global:pattern_rank");
-    return data || {};
+    if (!data || Object.keys(data).length === 0) {
+      console.warn("[find-email] globalRank empty — using fallback rank");
+      return FALLBACK_PATTERN_RANK;
+    }
+    return data;
   } catch {
-    return {};
+    console.warn("[find-email] globalRank fetch failed — using fallback rank");
+    return FALLBACK_PATTERN_RANK;
   }
 }
 
