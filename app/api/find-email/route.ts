@@ -332,6 +332,7 @@ export async function POST(request: NextRequest) {
     let reoonCalls = 0;
     let enrichleyCalls = 0;
     const patternsTried: string[] = [];
+    const domainsTried = new Set<string>();
 
     console.log(`[find-email] ${first} ${last} @ ${domain} → ${emailDomain} | trying ${candidates.length} candidates`);
 
@@ -340,6 +341,7 @@ export async function POST(request: NextRequest) {
       if (!candidateEmail) continue;
 
       patternsTried.push(`${eDomain}:${pattern}`);
+      domainsTried.add(eDomain);
 
       let reoon: { status: string; safe: boolean };
       try {
@@ -365,6 +367,7 @@ export async function POST(request: NextRequest) {
           reoon_calls: reoonCalls,
           enrichley_calls: enrichleyCalls,
           patterns_tried: patternsTried,
+          domains_tried: [...domainsTried],
         });
       }
 
@@ -419,6 +422,7 @@ export async function POST(request: NextRequest) {
       reoon_calls: reoonCalls,
       enrichley_calls: enrichleyCalls,
       patterns_tried: patternsTried,
+      domains_tried: [...domainsTried],
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
