@@ -451,7 +451,7 @@ export async function POST(request: NextRequest) {
       if (reoon.status !== "catch_all" && reoon.status !== "unknown") {
         await writeVerified(eDomain, pattern, false);
         consecutiveInvalid++;
-        if (consecutiveInvalid >= 3) {
+        if (consecutiveInvalid >= 5) {
           console.log(`[find-email] early exit: 3 consecutive invalid on ${domain}`);
           break;
         }
@@ -459,7 +459,7 @@ export async function POST(request: NextRequest) {
       }
       consecutiveInvalid = 0;
 
-      if (enrichleyCalls >= 5) {
+      if (enrichleyCalls >= 6) {
         await writeVerified(eDomain, pattern, false);
         continue;
       }
@@ -493,16 +493,6 @@ export async function POST(request: NextRequest) {
       }
 
       await writeVerified(eDomain, pattern, false);
-    }
-
-    // Mark domain as anti-probe after 3+ failed Reoon attempts with 0 finds.
-    // Any domain that burns 3+ attempts and returns nothing is not worth retrying.
-    // Never mark antiprobe for bank.in subdomains (RBI-regulated, Reoon always returns invalid).
-    // Only mark if group has fewer than 10 seeds — strong-seed groups are worth retrying.
-    const isBankIn = domain.endsWith(".bank.in");
-    if (reoonCalls >= 5 && !isBankIn && groupTotalSeeds < 10) {
-      const type = enrichleyCalls > 0 ? "catchall" : "invalid";
-      await markAntiprobe(domain, type);
     }
 
     return NextResponse.json({
